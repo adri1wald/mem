@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
-use std::env;
-use std::path::PathBuf;
+
+mod store;
+
+use store::MemoryStore;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -26,34 +28,42 @@ enum MemCommand {
         #[arg(short, long, value_name = "DESCRIPTION")]
         description: String,
     },
+    /// List memories from the store
+    List {
+        /// A description of the memory you are looking for
+        #[arg(short, long, value_name = "DESCRIPTION")]
+        description: String,
+        /// The maximum number of memories to list
+        #[arg(short, long, value_name = "COUNT", default_value_t = 10)]
+        count: u8,
+    },
 }
 
-const MEM_DATA_DIR_ENV_VAR: &str = "MEM_DATA_DIR";
-
-fn resolve_data_dir() -> PathBuf {
-    if let Ok(data_dir) = env::var(MEM_DATA_DIR_ENV_VAR) {
-        PathBuf::from(data_dir)
-    } else {
-        let home_dir = dirs::home_dir().expect(&format!(
-            "Unable to determine home directory. Set the {} environment variable to override.",
-            MEM_DATA_DIR_ENV_VAR
-        ));
-        home_dir.join(".mem")
-    }
-}
-
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = MemCli::parse();
-    let data_dir = resolve_data_dir();
+    let mut store = MemoryStore::load()?;
+
     match &cli.command {
         MemCommand::Insert { mem, description } => {
-            println!("Inserting memory: {}", mem);
-            println!("Description: {}", description);
-            println!("Data dir: {:?}", data_dir);
+            store.insert(mem, description)?;
+            println!("Memory inserted!");
         }
         MemCommand::Get { description } => {
-            println!("Getting memory: {}", description);
-            println!("Data dir: {:?}", data_dir);
+            let memory = store.get(description)?;
+            if let Some(memory) = memory {
+                println!("{memory}");
+            } else {
+                println!("No memory found!");
+            }
+        }
+        MemCommand::List { description, count } => {
+            let memories = store.list(description, *count as usize)?;
+            if memories.is_empty() {
+                println!("No memories found!");
+            } else {
+                memories.iter().for_each(|memory| println!("{memory}"));
+            }
         }
     }
+    Ok(())
 }
