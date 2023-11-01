@@ -1,18 +1,45 @@
+use serde::{Deserialize, Serialize};
+use serde_json;
 use std::env;
 use std::fs::{create_dir_all, File, OpenOptions};
-use std::io;
+use std::io::{self, Seek, SeekFrom};
 use std::path::PathBuf;
 
+/// A memory.
+#[derive(Serialize, Deserialize)]
+struct Memory {
+    value: String,
+    description: String,
+}
+
+/// A memory database.
+///
+/// TODO: optimize all this for fast insertion and retrieval.
+#[derive(Serialize, Deserialize)]
+struct MemoryDB {
+    memories: Vec<Memory>,
+    embeddings: Vec<f32>,
+}
+
+/// A store for memories.
+///
+/// Memories have a description and a value. The description is used for semantic retrieval.
 pub struct MemoryStore {
     data_file: File,
 }
 
 impl MemoryStore {
+    const EMBEDDING_SIZE: usize = 512;
+
     /// Insert a new memory into the store.
     pub fn insert(&mut self, memory: &str, description: &str) -> Result<(), io::Error> {
-        println!("Inserting memory: {}", memory);
-        println!("Description: {}", description);
-        println!("Data file: {:?}", self.data_file);
+        let mut db = self.load_db()?;
+        db.memories.push(Memory {
+            value: memory.to_string(),
+            description: description.to_string(),
+        });
+        db.embeddings.extend(vec![0.0; Self::EMBEDDING_SIZE]);
+        self.save_db(&db)?;
         Ok(())
     }
 
@@ -29,6 +56,35 @@ impl MemoryStore {
         println!("Count: {}", count);
         println!("Data file: {:?}", self.data_file);
         Ok(vec![])
+    }
+}
+
+/// Loading and saving the `MemoryDB` to a file.
+///
+/// TODO: this is all very inefficient. Need a more efficient way to store data / cache / etc.
+/// TODO: But we're just prototyping for now.
+impl MemoryStore {
+    /// Load the `MemoryDB` from the given `File`.
+    fn load_db(&mut self) -> Result<MemoryDB, io::Error> {
+        // if file is empty create a new db else load the db from the file
+        let db = if self.data_file.metadata()?.len() == 0 {
+            MemoryDB {
+                memories: vec![],
+                embeddings: vec![],
+            }
+        } else {
+            serde_json::from_reader(&self.data_file)?
+        };
+        Ok(db)
+    }
+
+    /// Save the `MemoryDB` to the given `File`.
+    fn save_db(&mut self, db: &MemoryDB) -> Result<(), io::Error> {
+        // delete the file contents
+        self.data_file.set_len(0)?;
+        self.data_file.seek(SeekFrom::Start(0))?;
+        serde_json::to_writer(&self.data_file, db)?;
+        Ok(())
     }
 }
 
