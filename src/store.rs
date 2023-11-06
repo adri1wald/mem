@@ -1,7 +1,8 @@
+use openai_api_rs::v1::api as openai;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
-use std::fs::{create_dir_all, File, OpenOptions};
+use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::path::PathBuf;
 
@@ -26,10 +27,11 @@ struct MemoryDB {
 /// Memories have a description and a value. The description is used for semantic retrieval.
 pub struct MemoryStore {
     data_file: File,
+    openai: openai::Client,
 }
 
 impl MemoryStore {
-    const EMBEDDING_SIZE: usize = 512;
+    const EMBEDDING_SIZE: usize = 1024;
 
     /// Insert a new memory into the store.
     pub fn insert(&mut self, memory: &str, description: &str) -> Result<(), io::Error> {
@@ -92,14 +94,28 @@ impl MemoryStore {
     const MEM_DATA_DIR_ENV_VAR: &str = "MEM_DATA_DIR";
     const DEFAULT_DATA_DIR_NAME: &str = ".mem";
     const DATA_FILE_NAME: &str = "store.json";
+    const OPENAI_API_KEY_FILE_NAME: &str = "openai_api_key.txt";
 
     /// Load the `MemoryStore` from the default data file.
     ///
     /// The default data directory is set by the `MEM_DATA_DIR` environment variable.
     /// If this variable is not set, the default data directory is `~/.mem`.
     pub fn load() -> Result<MemoryStore, io::Error> {
-        let data_file_path = Self::resolve_data_file_path();
-        create_dir_all(
+        let data_file = Self::default_data_file()?;
+        let openai = Self::default_openai_client()?;
+        Ok(Self::with_options(data_file, openai))
+    }
+
+    /// Create a new `MemoryStore` from the given `File`.
+    ///
+    /// This is useful for testing.
+    pub fn with_options(data_file: File, openai: openai::Client) -> MemoryStore {
+        MemoryStore { data_file, openai }
+    }
+
+    pub fn default_data_file() -> Result<File, io::Error> {
+        let data_file_path = Self::resolve_data_dir_path().join(Self::DATA_FILE_NAME);
+        std::fs::create_dir_all(
             data_file_path
                 .parent()
                 .expect("the data file path always has a parent directory"),
@@ -109,18 +125,26 @@ impl MemoryStore {
             .write(true)
             .create(true)
             .open(data_file_path)?;
-        Ok(Self::from_file(data_file))
+        Ok(data_file)
     }
 
-    /// Create a new `MemoryStore` from the given `File`.
-    ///
-    /// This is useful for testing.
-    pub fn from_file(data_file: File) -> MemoryStore {
-        MemoryStore { data_file }
+    pub fn default_openai_client() -> Result<openai::Client, io::Error> {
+        let openai_api_key_file_path =
+            Self::resolve_data_dir_path().join(Self::OPENAI_API_KEY_FILE_NAME);
+        let openai_api_key = std::fs::read_to_string(openai_api_key_file_path)?;
+        Ok(openai::Client::new(openai_api_key))
     }
 
-    fn resolve_data_file_path() -> PathBuf {
-        Self::resolve_data_dir_path().join(Self::DATA_FILE_NAME)
+    pub fn store_openai_api_key(openai_api_key: &str) -> Result<(), io::Error> {
+        let openai_api_key_file_path =
+            Self::resolve_data_dir_path().join(Self::OPENAI_API_KEY_FILE_NAME);
+        std::fs::create_dir_all(
+            openai_api_key_file_path
+                .parent()
+                .expect("the openai api key file path always has a parent directory"),
+        )?;
+        std::fs::write(openai_api_key_file_path, openai_api_key)?;
+        Ok(())
     }
 
     fn resolve_data_dir_path() -> PathBuf {

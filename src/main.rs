@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use std::io::{stdin, stdout, Write};
 
 mod store;
 
@@ -37,18 +38,21 @@ enum MemCommand {
         #[arg(short, long, value_name = "COUNT", default_value_t = 10)]
         count: u8,
     },
+    /// Set OpenAI API key
+    SetKey,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = MemCli::parse();
-    let mut store = MemoryStore::load()?;
 
     match &cli.command {
         MemCommand::Insert { mem, description } => {
+            let mut store = MemoryStore::load()?;
             store.insert(mem, description)?;
             println!("Memory inserted!");
         }
         MemCommand::Get { description } => {
+            let store = MemoryStore::load()?;
             let memory = store.get(description)?;
             if let Some(memory) = memory {
                 println!("{memory}");
@@ -57,12 +61,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         MemCommand::List { description, count } => {
+            let store = MemoryStore::load()?;
             let memories = store.list(description, *count as usize)?;
             if memories.is_empty() {
                 println!("No memories found!");
             } else {
                 memories.iter().for_each(|memory| println!("{memory}"));
             }
+        }
+        MemCommand::SetKey => {
+            print!("Please enter your API key: ");
+            let _ = stdout().flush();
+            let mut key = String::new();
+            stdin().read_line(&mut key)?;
+            key = key.trim_end().to_string();
+            MemoryStore::store_openai_api_key(&key)?;
+            println!("Key set!");
         }
     }
     Ok(())
